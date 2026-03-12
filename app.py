@@ -7,11 +7,16 @@ import plotly.graph_objects as go
 from keras.models import load_model
 from sklearn.preprocessing import MinMaxScaler
 
-st.set_page_config(page_title="Stock Analyzer", layout="wide")
+# -----------------------------
+# Page Config
+# -----------------------------
+st.set_page_config(page_title="AI Stock Analyzer", layout="wide")
 
 st.title("📈 AI Stock Trend Prediction")
 
+# -----------------------------
 # Sidebar
+# -----------------------------
 st.sidebar.header("Stock Search")
 
 ticker = st.sidebar.text_input("Enter Stock Ticker", "AAPL")
@@ -21,48 +26,92 @@ timeframe = st.sidebar.selectbox(
     ["1 Month","6 Months","1 Year","5 Years","Max"]
 )
 
-start = "2010-01-01"
-end = "2025-12-31"
+# -----------------------------
+# Download Stock Data (Cached)
+# -----------------------------
+@st.cache_data
+def load_data(ticker):
+    try:
+        data = yf.download(
+            ticker,
+            start="2010-01-01",
+            end="2025-12-31",
+            auto_adjust=False
+        )
+        return data
+    except:
+        return None
 
-# Download stock data
-df = yf.download(ticker, start=start, end=end)
+df = load_data(ticker)
 
-if df.empty:
-    st.error("Invalid stock ticker")
+if df is None or df.empty:
+    st.error("⚠️ Stock data unavailable (Yahoo rate limit). Please refresh.")
     st.stop()
 
-# Timeframe filtering
+# -----------------------------
+# Timeframe Filtering
+# -----------------------------
 if timeframe == "1 Month":
     df_chart = df.tail(22)
+
 elif timeframe == "6 Months":
     df_chart = df.tail(126)
+
 elif timeframe == "1 Year":
     df_chart = df.tail(252)
+
 elif timeframe == "5 Years":
     df_chart = df.tail(1260)
+
 else:
     df_chart = df
 
+# -----------------------------
 # Candlestick Chart
+# -----------------------------
 st.subheader("Candlestick Chart")
 
 fig = go.Figure(data=[go.Candlestick(
     x=df_chart.index,
-    open=df_chart["Open"],
-    high=df_chart["High"],
-    low=df_chart["Low"],
-    close=df_chart["Close"]
+    open=df_chart['Open'],
+    high=df_chart['High'],
+    low=df_chart['Low'],
+    close=df_chart['Close']
 )])
 
-fig.update_layout(height=500)
+fig.update_layout(
+    height=500,
+    xaxis_title="Date",
+    yaxis_title="Price"
+)
 
 st.plotly_chart(fig)
 
-# Moving averages
+# -----------------------------
+# Data Description
+# -----------------------------
+st.subheader("Stock Data Summary")
+
+st.write(df.describe())
+
+# -----------------------------
+# Closing Price Chart
+# -----------------------------
+st.subheader("Closing Price vs Time")
+
+fig1 = plt.figure(figsize=(12,6))
+
+plt.plot(df['Close'])
+
+st.pyplot(fig1)
+
+# -----------------------------
+# Moving Average
+# -----------------------------
+st.subheader("Moving Averages (100 & 200)")
+
 ma100 = df.Close.rolling(100).mean()
 ma200 = df.Close.rolling(200).mean()
-
-st.subheader("Moving Averages")
 
 fig2 = plt.figure(figsize=(12,6))
 
@@ -74,16 +123,21 @@ plt.legend()
 
 st.pyplot(fig2)
 
-# Load model safely
+# -----------------------------
+# Load AI Model
+# -----------------------------
 try:
     model = load_model("keras_model.keras", compile=False)
 except:
-    st.error("Model failed to load")
+    st.error("⚠️ Model failed to load. Check model file.")
     st.stop()
 
-# Data preparation
-data_training = pd.DataFrame(df["Close"][0:int(len(df)*0.70)])
-data_testing = pd.DataFrame(df["Close"][int(len(df)*0.70):])
+# -----------------------------
+# Data Preparation
+# -----------------------------
+data_training = pd.DataFrame(df['Close'][0:int(len(df)*0.70)])
+
+data_testing = pd.DataFrame(df['Close'][int(len(df)*0.70):])
 
 scaler = MinMaxScaler(feature_range=(0,1))
 
@@ -92,13 +146,15 @@ data_training_array = scaler.fit_transform(data_training)
 x_train = []
 y_train = []
 
-for i in range(100, data_training_array.shape[0]):
+for i in range(100,data_training_array.shape[0]):
     x_train.append(data_training_array[i-100:i])
     y_train.append(data_training_array[i,0])
 
 x_train,y_train = np.array(x_train),np.array(y_train)
 
-# Testing data
+# -----------------------------
+# Testing Data
+# -----------------------------
 past_100_days = data_training.tail(100)
 
 final_df = pd.concat([past_100_days,data_testing], ignore_index=True)
@@ -114,45 +170,80 @@ for i in range(100,input_data.shape[0]):
 
 x_test,y_test = np.array(x_test),np.array(y_test)
 
+# -----------------------------
 # Prediction
+# -----------------------------
 y_predicted = model.predict(x_test)
 
 scale = scaler.scale_
 
 y_predicted = y_predicted / scale[0]
+
 y_test = y_test / scale[0]
 
-# Plot prediction
-st.subheader("Prediction vs Original")
+# -----------------------------
+# Prediction Graph
+# -----------------------------
+st.subheader("Prediction vs Original Price")
 
 fig3 = plt.figure(figsize=(12,6))
 
 plt.plot(y_test,label="Original Price")
+
 plt.plot(y_predicted,label="Predicted Price")
 
 plt.legend()
 
 st.pyplot(fig3)
 
-# Next day prediction
-st.subheader("Next Day Prediction")
+# -----------------------------
+# Next Day Prediction
+# -----------------------------
+st.subheader("Next Day Predicted Price")
 
 next_price = y_predicted[-1][0]
 
 st.success(f"Predicted Next Price: ${next_price:.2f}")
 
-# Risk indicator
+# -----------------------------
+# Prediction Accuracy
+# -----------------------------
+st.subheader("Model Prediction Accuracy")
+
+error = np.mean(np.abs(y_test - y_predicted))
+
+accuracy = max(0,100-error)
+
+st.write(f"Average Prediction Error: {error:.2f}")
+
+st.write(f"Prediction Accuracy Score: {accuracy:.2f}%")
+
+# -----------------------------
+# Risk Indicator
+# -----------------------------
 st.subheader("Stock Risk Indicator")
 
-df["Daily Return"] = df["Close"].pct_change()
+df['Daily Return'] = df['Close'].pct_change()
 
-volatility = df["Daily Return"].std() * np.sqrt(252)
+volatility = df['Daily Return'].std()*np.sqrt(252)
 
-st.write(f"Volatility: {volatility:.2f}")
+st.write(f"Annual Volatility: {volatility:.2f}")
 
 if volatility < 0.2:
-    st.success("Low Risk")
+
+    st.success("Low Risk Stock")
+
 elif volatility < 0.4:
-    st.warning("Medium Risk")
+
+    st.warning("Medium Risk Stock")
+
 else:
-    st.error("High Risk")
+
+    st.error("High Risk Stock")
+
+# -----------------------------
+# Latest Market Data
+# -----------------------------
+st.subheader("Latest Market Data")
+
+st.write(df.tail())
