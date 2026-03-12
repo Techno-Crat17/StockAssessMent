@@ -2,6 +2,7 @@ streamlit
 tensorflow==2.12.0
 keras==2.12.0
 h5py==3.8.0
+protobuf==3.20.3
 yfinance
 pandas
 numpy
